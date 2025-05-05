@@ -16,22 +16,45 @@ class ImageToSTLConverter {
     constructor() {
         // Initialize Three.js components
         this.scene = new THREE.Scene();
-        this.camera = new THREE.PerspectiveCamera(75, 1, 0.1, 1000);
+        this.scene.background = new THREE.Color(0x000000);
         this.previewContainer = document.getElementById('preview-container') as HTMLDivElement;
-        this.renderer = new THREE.WebGLRenderer({ antialias: true });
+        
+        // Set up camera with proper aspect ratio
+        const aspect = this.previewContainer.clientWidth / this.previewContainer.clientHeight;
+        this.camera = new THREE.PerspectiveCamera(75, aspect, 0.1, 1000);
+        
+        // Initialize renderer with proper size and pixel ratio
+        this.renderer = new THREE.WebGLRenderer({ 
+            antialias: true,
+            alpha: false
+        });
+        this.renderer.setPixelRatio(window.devicePixelRatio);
         this.renderer.setSize(this.previewContainer.clientWidth, this.previewContainer.clientHeight);
+        this.renderer.shadowMap.enabled = true;
+        this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
         this.previewContainer.appendChild(this.renderer.domElement);
 
         // Set up camera and controls
-        this.camera.position.z = 5;
+        this.camera.position.set(100, 100, 100);
         this.controls = new OrbitControls(this.camera, this.renderer.domElement);
         this.controls.enableDamping = true;
+        this.controls.dampingFactor = 0.05;
+        this.controls.screenSpacePanning = true;
+        this.controls.minDistance = 1;
+        this.controls.maxDistance = 1000;
 
-        // Add lighting
-        const ambientLight = new THREE.AmbientLight(0x404040);
-        const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
-        directionalLight.position.set(1, 1, 1);
-        this.scene.add(ambientLight, directionalLight);
+        // Enhanced lighting setup
+        const ambientLight = new THREE.AmbientLight(0x404040, 1);
+        const directionalLight = new THREE.DirectionalLight(0xffffff, 1.5);
+        directionalLight.position.set(100, 100, 100);
+        directionalLight.castShadow = true;
+        
+        const hemisphereLight = new THREE.HemisphereLight(0xffffbb, 0x080820, 1);
+        this.scene.add(ambientLight, directionalLight, hemisphereLight);
+
+        // Add grid helper for better orientation
+        const gridHelper = new THREE.GridHelper(200, 20);
+        this.scene.add(gridHelper);
 
         // Initialize UI elements
         this.imageInput = document.getElementById('image-input') as HTMLInputElement;
@@ -103,42 +126,74 @@ class ImageToSTLConverter {
         const { type, data } = event.data;
 
         if (type === 'stlGenerated') {
-            // Store the STL data for download
-            this.currentSTL = data;
+            try {
+                // Store the STL data for download
+                this.currentSTL = data;
 
-            // Load the STL data into the scene
-            const loader = new STLLoader();
-            const geometry = loader.parse(data);
-            const material = new THREE.MeshPhongMaterial({ 
-                color: 0x00ff00,
-                flatShading: true
-            });
-            const mesh = new THREE.Mesh(geometry, material);
+                // Load the STL data into the scene
+                const loader = new STLLoader();
+                const geometry = loader.parse(data);
+                
+                // Center the geometry
+                geometry.center();
+                
+                const material = new THREE.MeshPhongMaterial({ 
+                    color: 0x1e88e5,  // Nice blue color
+                    specular: 0x111111,
+                    shininess: 200,
+                    side: THREE.DoubleSide
+                });
+                const mesh = new THREE.Mesh(geometry, material);
+                mesh.castShadow = true;
+                mesh.receiveShadow = true;
 
-            // Clear existing mesh
-            this.scene.clear();
-            this.scene.add(mesh);
+                // Clear existing mesh and add new one
+                this.scene.clear();
+                
+                // Re-add lights and helpers
+                const ambientLight = new THREE.AmbientLight(0x404040, 1);
+                const directionalLight = new THREE.DirectionalLight(0xffffff, 1.5);
+                directionalLight.position.set(100, 100, 100);
+                directionalLight.castShadow = true;
+                const hemisphereLight = new THREE.HemisphereLight(0xffffbb, 0x080820, 1);
+                const gridHelper = new THREE.GridHelper(200, 20);
+                
+                this.scene.add(mesh, ambientLight, directionalLight, hemisphereLight, gridHelper);
 
-            // Center the camera on the mesh
-            const box = new THREE.Box3().setFromObject(mesh);
-            const center = box.getCenter(new THREE.Vector3());
-            const size = box.getSize(new THREE.Vector3());
-            const maxDim = Math.max(size.x, size.y, size.z);
-            this.camera.position.copy(center);
-            this.camera.position.z += maxDim * 2;
-            this.controls.target.copy(center);
+                // Reset camera and controls
+                const box = new THREE.Box3().setFromObject(mesh);
+                const center = box.getCenter(new THREE.Vector3());
+                const size = box.getSize(new THREE.Vector3());
+                const maxDim = Math.max(size.x, size.y, size.z);
+                
+                this.camera.position.set(
+                    center.x + maxDim * 2,
+                    center.y + maxDim * 2,
+                    center.z + maxDim * 2
+                );
+                this.controls.target.copy(center);
+                this.camera.lookAt(center);
+                this.controls.update();
 
-            // Enable download button
-            this.downloadButton.disabled = false;
+                // Enable download button
+                this.downloadButton.disabled = false;
+            } catch (error) {
+                console.error('Error loading STL:', error);
+            }
         }
     }
 
     private handleResize() {
+        if (!this.previewContainer) return;
+        
         const width = this.previewContainer.clientWidth;
         const height = this.previewContainer.clientHeight;
+        
         this.camera.aspect = width / height;
         this.camera.updateProjectionMatrix();
-        this.renderer.setSize(width, height);
+        
+        this.renderer.setPixelRatio(window.devicePixelRatio);
+        this.renderer.setSize(width, height, true);
     }
 
     private handleDownload() {
